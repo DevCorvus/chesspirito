@@ -27,6 +27,7 @@ interface Move {
   san: string;
   from: Position;
   to: Position;
+  capturedPiece: ChessPiece | null;
 }
 
 type Color = "w" | "b";
@@ -516,6 +517,10 @@ export class Chesspirito {
 
   setSquare(pos: Position, square: Square): void {
     this.grid[pos.y][pos.x] = square;
+
+    if (square !== null) {
+      square.position = pos;
+    }
   }
 
   isSquareEmpty(pos: Position) {
@@ -577,21 +582,24 @@ export class Chesspirito {
 
     this.setSquare(toPos, piece);
     this.setSquare(fromPos, null);
-    piece.position = toPos;
 
     const mv = typeof to === "object" ? this.getMoveFromPosition(to) : to;
 
     piece.moves.push(mv);
     this.history.push({
+      san: piece instanceof Pawn ? mv : piece.type + mv,
       from: fromPos,
       to: toPos,
-      san:
-        piece.type === Piece.WHITE_PAWN || piece.type === Piece.BLACK_PAWN
-          ? mv
-          : piece.type + mv,
+      capturedPiece: null,
     });
 
     this.togglePlayingColor();
+
+    // Following KISS principle (Brute force)
+    if (this.inCheck(this.playingColor === "w" ? "b" : "w")) {
+      this.undo();
+      throw new Error("Invalid move = King in check");
+    }
   }
 
   attack(from: string | Position, to: string | Position) {
@@ -600,7 +608,7 @@ export class Chesspirito {
     const toPos = typeof to === "string" ? this.getPositionFromMove(to) : to;
 
     const piece = this.getSquare(fromPos);
-    const pieceToAttack = this.getSquare(toPos);
+    const attackedPiece = this.getSquare(toPos);
 
     if (piece === null) {
       throw new Error("Invalid attack = no piece");
@@ -610,12 +618,16 @@ export class Chesspirito {
       throw new Error("Invalid attack = not playing color");
     }
 
-    if (pieceToAttack === null) {
+    if (attackedPiece === null) {
       throw new Error("Invalid attack = no piece to attack");
     }
 
-    if (piece.color === pieceToAttack.color) {
+    if (piece.color === attackedPiece.color) {
       throw new Error("Invalid attack = cannot attack same color piece");
+    }
+
+    if (attackedPiece instanceof King) {
+      throw new Error("Invalid attack = King cannot be captured");
     }
 
     if (!piece.canAttack(toPos)) {
@@ -624,7 +636,6 @@ export class Chesspirito {
 
     this.setSquare(toPos, piece);
     this.setSquare(fromPos, null);
-    piece.position = toPos;
 
     const fromMove =
       typeof from === "object" ? this.getMoveFromPosition(from) : from;
@@ -632,15 +643,90 @@ export class Chesspirito {
 
     piece.moves.push(toMove);
     this.history.push({
-      from: fromPos,
-      to: toPos,
       san:
-        piece.type === Piece.WHITE_PAWN || piece.type === Piece.BLACK_PAWN
+        piece instanceof Pawn
           ? fromMove[0] + "x" + toMove
           : piece.type + "x" + toMove,
+      from: fromPos,
+      to: toPos,
+      capturedPiece: attackedPiece,
     });
 
     this.togglePlayingColor();
+
+    // Following KISS principle (Brute force)
+    if (this.inCheck(this.playingColor === "w" ? "b" : "w")) {
+      this.undo();
+      throw new Error("Invalid attack = King in check");
+    }
+  }
+
+  undo() {
+    const lastMove = this.history.pop();
+
+    if (!lastMove) {
+      throw new Error("Invalid undo = clean history");
+    }
+
+    const movedPiece = this.getSquare(lastMove.to);
+
+    if (movedPiece === null) {
+      throw new Error("Invalid undo = unexpected nullish piece");
+    }
+
+    this.setSquare(lastMove.from, movedPiece);
+    movedPiece.moves.pop();
+
+    if (lastMove.capturedPiece !== null) {
+      this.setSquare(lastMove.to, lastMove.capturedPiece);
+    } else {
+      this.setSquare(lastMove.to, null);
+    }
+
+    this.togglePlayingColor();
+  }
+
+  isSquareAttacked(position: string | Position) {
+    const pos =
+      typeof position === "string"
+        ? this.getPositionFromMove(position)
+        : position;
+
+    const piece = this.getSquare(pos);
+
+    if (piece === null) {
+      throw new Error("Invalid calculation = no piece");
+    }
+
+    for (let y = 0; y < RANK_LENGTH; y++) {
+      for (let x = 0; x < RANK_LENGTH; x++) {
+        const attackingPiece = this.getSquare({ y, x });
+
+        if (
+          attackingPiece !== null &&
+          attackingPiece.color !== piece.color &&
+          attackingPiece.canAttack(pos)
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  inCheck(color: Color) {
+    for (let y = 0; y < RANK_LENGTH; y++) {
+      for (let x = 0; x < RANK_LENGTH; x++) {
+        const piece = this.getSquare({ y, x });
+
+        if (piece !== null && piece instanceof King && piece.color === color) {
+          return this.isSquareAttacked({ y, x });
+        }
+      }
+    }
+
+    throw new Error("Invalid calculation = King not found");
   }
 
   print() {
