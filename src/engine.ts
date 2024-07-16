@@ -18,16 +18,26 @@ enum Piece {
   BLACK_KING = "k",
 }
 
+type DirectionCoordinate = -1 | 0 | 1;
+type Direction = [DirectionCoordinate, DirectionCoordinate];
+
 interface Position {
   x: number;
   y: number;
 }
 
 interface Move {
-  san: string;
   from: Position;
   to: Position;
-  capturedPiece: ChessPiece | null;
+  onlyMove?: boolean;
+  onlyAttack?: boolean;
+}
+
+interface HistoryMove {
+  from: Position;
+  to: Position;
+  capture: ChessPiece | null;
+  san: string;
 }
 
 type Color = "w" | "b";
@@ -38,8 +48,7 @@ interface ChessPiece {
   color: Color;
   position: Position;
   moves: string[];
-  canMove(pos: Position): boolean;
-  canAttack(pos: Position): boolean;
+  generateMoves(): Move[];
 }
 
 type Square = ChessPiece | null;
@@ -48,16 +57,57 @@ function isRank(num: number): boolean {
   return num >= 1 && num <= 8;
 }
 
-function isOutOfBoundaries(num: number): boolean {
+function isOutOfBounds(num: number): boolean {
   return num < 0 || num > 7;
 }
 
+function isPositionOutOfBounds(pos: Position) {
+  return isOutOfBounds(pos.y) || isOutOfBounds(pos.x);
+}
+
+function isSamePosition(pos1: Position, pos2: Position): boolean {
+  return pos1.x === pos2.x && pos1.y === pos2.y;
+}
+
+function getOppositeColor(color: Color): Color {
+  return color === "w" ? "b" : "w";
+}
+
+function generateSlidingMoves(piece: ChessPiece, directions: Direction[]) {
+  const board = piece.board;
+  const moves: Move[] = [];
+
+  for (const [yDirection, xDirection] of directions) {
+    const pos = {
+      y: piece.position.y + yDirection,
+      x: piece.position.x + xDirection,
+    };
+
+    while (!isPositionOutOfBounds(pos)) {
+      const targetSquare = board.getSquare(pos);
+
+      if (targetSquare === null || targetSquare.color !== piece.color) {
+        moves.push({ from: piece.position, to: { ...pos } });
+      }
+
+      if (targetSquare !== null) {
+        break;
+      }
+
+      pos.y += yDirection;
+      pos.x += xDirection;
+    }
+  }
+
+  return moves;
+}
+
 class Pawn implements ChessPiece {
-  public board: Chesspirito;
-  public type: Piece;
-  public color: Color;
-  public position: Position;
-  public moves: string[];
+  board: Chesspirito;
+  type: Piece;
+  color: Color;
+  position: Position;
+  moves: string[];
 
   constructor(board: Chesspirito, color: Color, pos: Position) {
     this.board = board;
@@ -67,47 +117,51 @@ class Pawn implements ChessPiece {
     this.moves = [];
   }
 
-  canMove(pos: Position): boolean {
-    const sameFile = pos.x === this.position.x;
-
-    if (!sameFile) {
-      return false;
-    }
-
-    const yForward = this.position.y + (this.color === "w" ? -1 : 1);
-    const canStepOne = sameFile && pos.y === yForward;
-
-    if (canStepOne) {
-      return true;
-    }
-
-    if (this.moves.length === 0) {
-      const canStepTwo =
-        this.board.isSquareEmpty({ x: this.position.x, y: yForward }) &&
-        pos.y === this.position.y + (this.color === "w" ? -2 : 2);
-
-      return canStepTwo;
-    }
-
-    return false;
-  }
-
-  canAttack(pos: Position): boolean {
+  generateMoves(): Move[] {
     const step = this.color === "w" ? -1 : 1;
 
-    return (
-      pos.y === this.position.y + step &&
-      (pos.x === this.position.x + step || pos.x === this.position.x - step)
+    const forwardMove: Move = {
+      from: this.position,
+      to: { y: this.position.y + step, x: this.position.x },
+      onlyMove: true,
+    };
+
+    const moves: Move[] = [
+      forwardMove,
+      {
+        from: this.position,
+        to: { y: this.position.y + step, x: this.position.x - 1 },
+        onlyAttack: true,
+      },
+      {
+        from: this.position,
+        to: { y: this.position.y + step, x: this.position.x + 1 },
+        onlyAttack: true,
+      },
+    ];
+
+    if (this.moves.length === 0 && this.board.isSquareEmpty(forwardMove.to)) {
+      moves.push({
+        from: this.position,
+        to: { y: this.position.y + step * 2, x: this.position.x },
+        onlyMove: true,
+      });
+    }
+
+    return moves.filter(
+      (move) =>
+        !isPositionOutOfBounds(move.to) &&
+        this.board.getSquare(move.to)?.color !== this.color,
     );
   }
 }
 
 class Knight implements ChessPiece {
-  public board: Chesspirito;
-  public type: Piece;
-  public color: Color;
-  public position: Position;
-  public moves: string[];
+  board: Chesspirito;
+  type: Piece;
+  color: Color;
+  position: Position;
+  moves: string[];
 
   constructor(board: Chesspirito, color: Color, pos: Position) {
     this.board = board;
@@ -117,10 +171,10 @@ class Knight implements ChessPiece {
     this.moves = [];
   }
 
-  canMove(pos: Position): boolean {
+  generateMoves(): Move[] {
     const { x, y } = this.position;
 
-    const possibleMoves: Position[] = [
+    const moves: Move[] = [
       { y: y - 1, x: x - 2 },
       { y: y - 2, x: x - 1 },
       { y: y - 2, x: x + 1 },
@@ -129,22 +183,22 @@ class Knight implements ChessPiece {
       { y: y + 2, x: x + 1 },
       { y: y + 2, x: x - 1 },
       { y: y + 1, x: x - 2 },
-    ];
+    ].map((pos) => ({ from: this.position, to: pos }));
 
-    return possibleMoves.some((pm) => pos.x === pm.x && pos.y === pm.y);
-  }
-
-  canAttack(pos: Position): boolean {
-    return this.canMove(pos);
+    return moves.filter(
+      (move) =>
+        !isPositionOutOfBounds(move.to) &&
+        this.board.getSquare(move.to)?.color !== this.color,
+    );
   }
 }
 
 class Bishop implements ChessPiece {
-  public board: Chesspirito;
-  public type: Piece;
-  public color: Color;
-  public position: Position;
-  public moves: string[];
+  board: Chesspirito;
+  type: Piece;
+  color: Color;
+  position: Position;
+  moves: string[];
 
   constructor(board: Chesspirito, color: Color, pos: Position) {
     this.board = board;
@@ -154,77 +208,24 @@ class Bishop implements ChessPiece {
     this.moves = [];
   }
 
-  canMove(pos: Position): boolean {
-    const directions = [
+  generateMoves(): Move[] {
+    const directions: Direction[] = [
       [-1, -1],
       [-1, 1],
       [1, 1],
       [1, -1],
     ];
 
-    for (const [yDirection, xDirection] of directions) {
-      let yCoord = this.position.y + yDirection;
-      let xCoord = this.position.x + xDirection;
-
-      while (
-        !isOutOfBoundaries(yCoord) &&
-        !isOutOfBoundaries(xCoord) &&
-        this.board.isSquareEmpty({ x: xCoord, y: yCoord })
-      ) {
-        if (pos.y === yCoord && pos.x === xCoord) {
-          return true;
-        }
-
-        yCoord += yDirection;
-        xCoord += xDirection;
-      }
-    }
-
-    return false;
-  }
-
-  canAttack(pos: Position): boolean {
-    const directions = [
-      [-1, -1],
-      [-1, 1],
-      [1, -1],
-      [1, 1],
-    ];
-
-    for (const [yDirection, xDirection] of directions) {
-      let yCoord = this.position.y + yDirection;
-      let xCoord = this.position.x + xDirection;
-
-      while (!isOutOfBoundaries(yCoord) && !isOutOfBoundaries(xCoord)) {
-        const isTargetPosition = pos.y === yCoord && pos.x === xCoord;
-        const isEmptySquare = this.board.isSquareEmpty({
-          x: xCoord,
-          y: yCoord,
-        });
-
-        if (!isEmptySquare && !isTargetPosition) {
-          break;
-        }
-
-        if (isTargetPosition) {
-          return true;
-        }
-
-        yCoord += yDirection;
-        xCoord += xDirection;
-      }
-    }
-
-    return false;
+    return generateSlidingMoves(this, directions);
   }
 }
 
 class Rook implements ChessPiece {
-  public board: Chesspirito;
-  public type: Piece;
-  public color: Color;
-  public position: Position;
-  public moves: string[];
+  board: Chesspirito;
+  type: Piece;
+  color: Color;
+  position: Position;
+  moves: string[];
 
   constructor(board: Chesspirito, color: Color, pos: Position) {
     this.board = board;
@@ -234,77 +235,24 @@ class Rook implements ChessPiece {
     this.moves = [];
   }
 
-  canMove(pos: Position): boolean {
-    const directions = [
+  generateMoves(): Move[] {
+    const directions: Direction[] = [
       [0, -1],
       [-1, 0],
       [0, 1],
       [1, 0],
     ];
 
-    for (const [yDirection, xDirection] of directions) {
-      let yCoord = this.position.y + yDirection;
-      let xCoord = this.position.x + xDirection;
-
-      while (
-        !isOutOfBoundaries(yCoord) &&
-        !isOutOfBoundaries(xCoord) &&
-        this.board.isSquareEmpty({ x: xCoord, y: yCoord })
-      ) {
-        if (pos.y === yCoord && pos.x === xCoord) {
-          return true;
-        }
-
-        yCoord += yDirection;
-        xCoord += xDirection;
-      }
-    }
-
-    return false;
-  }
-
-  canAttack(pos: Position): boolean {
-    const directions = [
-      [0, -1],
-      [-1, 0],
-      [0, 1],
-      [1, 0],
-    ];
-
-    for (const [yDirection, xDirection] of directions) {
-      let yCoord = this.position.y + yDirection;
-      let xCoord = this.position.x + xDirection;
-
-      while (!isOutOfBoundaries(yCoord) && !isOutOfBoundaries(xCoord)) {
-        const isTargetPosition = pos.y === yCoord && pos.x === xCoord;
-        const isEmptySquare = this.board.isSquareEmpty({
-          x: xCoord,
-          y: yCoord,
-        });
-
-        if (!isEmptySquare && !isTargetPosition) {
-          break;
-        }
-
-        if (isTargetPosition) {
-          return true;
-        }
-
-        yCoord += yDirection;
-        xCoord += xDirection;
-      }
-    }
-
-    return false;
+    return generateSlidingMoves(this, directions);
   }
 }
 
 class Queen implements ChessPiece {
-  public board: Chesspirito;
-  public type: Piece;
-  public color: Color;
-  public position: Position;
-  public moves: string[];
+  board: Chesspirito;
+  type: Piece;
+  color: Color;
+  position: Position;
+  moves: string[];
 
   constructor(board: Chesspirito, color: Color, pos: Position) {
     this.board = board;
@@ -314,8 +262,8 @@ class Queen implements ChessPiece {
     this.moves = [];
   }
 
-  canMove(pos: Position): boolean {
-    const directions = [
+  generateMoves(): Move[] {
+    const directions: Direction[] = [
       [0, -1],
       [-1, 0],
       [0, 1],
@@ -326,73 +274,16 @@ class Queen implements ChessPiece {
       [1, -1],
     ];
 
-    for (const [yDirection, xDirection] of directions) {
-      let yCoord = this.position.y + yDirection;
-      let xCoord = this.position.x + xDirection;
-
-      while (
-        !isOutOfBoundaries(yCoord) &&
-        !isOutOfBoundaries(xCoord) &&
-        this.board.isSquareEmpty({ x: xCoord, y: yCoord })
-      ) {
-        if (pos.y === yCoord && pos.x === xCoord) {
-          return true;
-        }
-
-        yCoord += yDirection;
-        xCoord += xDirection;
-      }
-    }
-
-    return false;
-  }
-
-  canAttack(pos: Position): boolean {
-    const directions = [
-      [0, -1],
-      [-1, 0],
-      [0, 1],
-      [1, 0],
-      [-1, -1],
-      [-1, 1],
-      [1, -1],
-      [1, 1],
-    ];
-
-    for (const [yDirection, xDirection] of directions) {
-      let yCoord = this.position.y + yDirection;
-      let xCoord = this.position.x + xDirection;
-
-      while (!isOutOfBoundaries(yCoord) && !isOutOfBoundaries(xCoord)) {
-        const isTargetPosition = pos.y === yCoord && pos.x === xCoord;
-        const isEmptySquare = this.board.isSquareEmpty({
-          x: xCoord,
-          y: yCoord,
-        });
-
-        if (!isEmptySquare && !isTargetPosition) {
-          break;
-        }
-
-        if (isTargetPosition) {
-          return true;
-        }
-
-        yCoord += yDirection;
-        xCoord += xDirection;
-      }
-    }
-
-    return false;
+    return generateSlidingMoves(this, directions);
   }
 }
 
 class King implements ChessPiece {
-  public board: Chesspirito;
-  public type: Piece;
-  public color: Color;
-  public position: Position;
-  public moves: string[];
+  board: Chesspirito;
+  type: Piece;
+  color: Color;
+  position: Position;
+  moves: string[];
 
   constructor(board: Chesspirito, color: Color, pos: Position) {
     this.board = board;
@@ -402,10 +293,10 @@ class King implements ChessPiece {
     this.moves = [];
   }
 
-  canMove(pos: Position): boolean {
+  generateMoves(): Move[] {
     const { x, y } = this.position;
 
-    const possibleMoves: Position[] = [
+    const moves: Move[] = [
       { y: y - 1, x: x - 1 },
       { y: y - 1, x: x + 0 },
       { y: y - 1, x: x + 1 },
@@ -414,13 +305,13 @@ class King implements ChessPiece {
       { y: y + 1, x: x + 0 },
       { y: y + 1, x: x - 1 },
       { y: y + 0, x: x - 1 },
-    ];
+    ].map((pos) => ({ from: this.position, to: pos }));
 
-    return possibleMoves.some((pm) => pos.x === pm.x && pos.y === pm.y);
-  }
-
-  canAttack(pos: Position): boolean {
-    return this.canMove(pos);
+    return moves.filter(
+      (move) =>
+        !isPositionOutOfBounds(move.to) &&
+        this.board.getSquare(move.to)?.color !== this.color,
+    );
   }
 }
 
@@ -467,14 +358,28 @@ class ChessPieceFactory {
   }
 }
 
+interface SanGenerationOptions {
+  piece: ChessPiece;
+  from: string;
+  to: string;
+  capture: boolean;
+  check: boolean;
+  mate: boolean;
+}
+
+type GameOver = "0-0" | "1-0" | "0-1";
+
 export class Chesspirito {
-  private grid: Square[][];
-  private playingColor: Color;
-  public history: Move[];
+  grid: Square[][];
+  playingColor: Color;
+  currLegalMoves: Move[];
+  history: HistoryMove[];
+  gameOver: GameOver | null;
 
   constructor(fen = DEFAULT_FEN) {
     this.grid = [];
     this.history = [];
+    this.gameOver = null;
 
     for (let y = 0; y < RANK_LENGTH; y++) {
       const emptyRank = Array(RANK_LENGTH).fill(null);
@@ -509,13 +414,26 @@ export class Chesspirito {
         }
       }
     }
+
+    const legalMoves = this.generateLegalMoves(this.playingColor);
+    const check = this.inCheck(this.playingColor);
+
+    if (legalMoves.length === 0) {
+      if (check) {
+        this.gameOver = this.playingColor === "w" ? "1-0" : "0-1";
+      } else {
+        this.gameOver = "0-0";
+      }
+    }
+
+    this.currLegalMoves = legalMoves;
   }
 
   getSquare(pos: Position): Square {
     return this.grid[pos.y][pos.x];
   }
 
-  setSquare(pos: Position, square: Square): void {
+  private setSquare(pos: Position, square: Square): void {
     this.grid[pos.y][pos.x] = square;
 
     if (square !== null) {
@@ -527,11 +445,11 @@ export class Chesspirito {
     return this.getSquare(pos) === null;
   }
 
-  togglePlayingColor() {
+  private togglePlayingColor() {
     this.playingColor = this.playingColor === "w" ? "b" : "w";
   }
 
-  getPositionFromMove(mv: string): Position {
+  private getPositionFromMove(mv: string): Position {
     if (mv.length !== 2) {
       throw new Error("Invalid move = " + mv);
     }
@@ -553,16 +471,139 @@ export class Chesspirito {
     return { x: fileIndex, y: Number(rank) - 1 };
   }
 
-  getMoveFromPosition(pos: Position): string {
+  private getMoveFromPosition(pos: Position): string {
     return FILES[pos.y] + pos.x;
   }
 
+  private generateSan({
+    piece,
+    from,
+    to,
+    capture,
+    check,
+    mate,
+  }: SanGenerationOptions): string {
+    let san = "";
+
+    const isPawn = piece instanceof Pawn;
+
+    san += isPawn ? to : piece.type;
+
+    if (isPawn && capture) {
+      san = from[0] + "x" + san;
+    }
+
+    if (!isPawn && capture) {
+      san += "x" + to;
+    } else if (!isPawn) {
+      san += to;
+    }
+
+    if (mate) {
+      san += "#";
+    } else if (check) {
+      san += "+";
+    }
+
+    return san;
+  }
+
+  private generateMoves(color: Color): Move[] {
+    let moves: Move[] = [];
+
+    for (let y = 0; y < RANK_LENGTH; y++) {
+      for (let x = 0; x < RANK_LENGTH; x++) {
+        const piece = this.getSquare({ y, x });
+
+        if (piece !== null && piece.color === color) {
+          const pieceMoves = piece.generateMoves();
+          moves = moves.concat(pieceMoves);
+        }
+      }
+    }
+
+    return moves;
+  }
+
+  private generateLegalMoves(color: Color): Move[] {
+    const legalMoves: Move[] = [];
+    const pseudoLegalMoves = this.generateMoves(color);
+
+    const king = color === "w" ? Piece.WHITE_KING : Piece.BLACK_KING;
+
+    const opponentColor = getOppositeColor(color);
+
+    for (const pseudoLegalMove of pseudoLegalMoves) {
+      const square = this.getSquare(pseudoLegalMove.from);
+      const targetSquare = this.getSquare(pseudoLegalMove.to);
+
+      this.setSquare(pseudoLegalMove.to, square);
+      this.setSquare(pseudoLegalMove.from, null);
+
+      const opponentMoves = this.generateMoves(opponentColor);
+
+      const threatensKing = opponentMoves.some((move) => {
+        const piece = this.getSquare(move.to);
+        return piece !== null && piece.type === king;
+      });
+
+      if (!threatensKing) {
+        legalMoves.push(pseudoLegalMove);
+      }
+
+      this.setSquare(pseudoLegalMove.to, targetSquare);
+      this.setSquare(pseudoLegalMove.from, square);
+    }
+
+    return legalMoves;
+  }
+
+  private getKingPosition(color: Color): Position {
+    const king = color === "w" ? Piece.WHITE_KING : Piece.BLACK_KING;
+
+    for (let y = 0; y < RANK_LENGTH; y++) {
+      for (let x = 0; x < RANK_LENGTH; x++) {
+        const piece = this.getSquare({ y, x });
+
+        if (piece !== null && piece.color === color && piece.type === king) {
+          return piece.position;
+        }
+      }
+    }
+
+    throw new Error("King not found");
+  }
+
+  private inCheck(color: Color) {
+    const kingPos = this.getKingPosition(color);
+    const opponentColor = getOppositeColor(color);
+
+    const opponentMoves = this.generateMoves(opponentColor);
+
+    return opponentMoves.some((move) => {
+      if (!move.onlyMove) {
+        return isSamePosition(move.to, kingPos);
+      } else {
+        return false;
+      }
+    });
+  }
+
   move(from: string | Position, to: string | Position) {
+    if (this.gameOver !== null) {
+      throw new Error("Invalid move = GameOver");
+    }
+
     const fromPos =
       typeof from === "string" ? this.getPositionFromMove(from) : from;
     const toPos = typeof to === "string" ? this.getPositionFromMove(to) : to;
 
+    if (isPositionOutOfBounds(fromPos) || isPositionOutOfBounds(toPos)) {
+      throw new Error("Invalid move = out of bounds");
+    }
+
     const piece = this.getSquare(fromPos);
+    const attackedPiece = this.getSquare(toPos);
 
     if (piece === null) {
       throw new Error("Invalid move = no piece");
@@ -572,70 +613,51 @@ export class Chesspirito {
       throw new Error("Invalid move = not playing color");
     }
 
-    if (!this.isSquareEmpty(toPos)) {
-      throw new Error("Invalid move = square occupied");
-    }
-
-    if (!piece.canMove(toPos)) {
-      throw new Error("Invalid move = " + from + "-" + to);
-    }
-
-    this.setSquare(toPos, piece);
-    this.setSquare(fromPos, null);
-
-    const mv = typeof to === "object" ? this.getMoveFromPosition(to) : to;
-
-    piece.moves.push(mv);
-    this.history.push({
-      san: piece instanceof Pawn ? mv : piece.type + mv,
-      from: fromPos,
-      to: toPos,
-      capturedPiece: null,
-    });
-
-    this.togglePlayingColor();
-
-    // Following KISS principle (Brute force)
-    if (this.inCheck(this.playingColor === "w" ? "b" : "w")) {
-      this.undo();
-      throw new Error("Invalid move = King in check");
-    }
-  }
-
-  attack(from: string | Position, to: string | Position) {
-    const fromPos =
-      typeof from === "string" ? this.getPositionFromMove(from) : from;
-    const toPos = typeof to === "string" ? this.getPositionFromMove(to) : to;
-
-    const piece = this.getSquare(fromPos);
-    const attackedPiece = this.getSquare(toPos);
-
-    if (piece === null) {
-      throw new Error("Invalid attack = no piece");
-    }
-
-    if (piece.color !== this.playingColor) {
-      throw new Error("Invalid attack = not playing color");
-    }
-
-    if (attackedPiece === null) {
-      throw new Error("Invalid attack = no piece to attack");
-    }
-
-    if (piece.color === attackedPiece.color) {
-      throw new Error("Invalid attack = cannot attack same color piece");
+    if (attackedPiece?.color === this.playingColor) {
+      throw new Error("Invalid move = cannot move to friendly piece");
     }
 
     if (attackedPiece instanceof King) {
       throw new Error("Invalid attack = King cannot be captured");
     }
 
-    if (!piece.canAttack(toPos)) {
-      throw new Error("Invalid attack = " + from + "-" + to);
+    const attacking = Boolean(attackedPiece);
+
+    const isLegalMove = this.currLegalMoves.some((move) => {
+      const validPosition =
+        isSamePosition(move.from, fromPos) && isSamePosition(move.to, toPos);
+
+      if (move.onlyMove) {
+        return validPosition && !attacking;
+      } else if (move.onlyAttack) {
+        return validPosition && attacking;
+      } else {
+        return validPosition;
+      }
+    });
+
+    if (!isLegalMove) {
+      throw new Error("Invalid move = " + from + "-" + to);
     }
 
     this.setSquare(toPos, piece);
     this.setSquare(fromPos, null);
+
+    const opponentColor = getOppositeColor(this.playingColor);
+
+    const check = this.inCheck(opponentColor);
+    const opponentLegalMoves = this.generateLegalMoves(opponentColor);
+
+    let mate = false;
+    let draw = false;
+
+    if (opponentLegalMoves.length === 0) {
+      if (check) {
+        mate = true;
+      } else {
+        draw = true;
+      }
+    }
 
     const fromMove =
       typeof from === "object" ? this.getMoveFromPosition(from) : from;
@@ -643,21 +665,26 @@ export class Chesspirito {
 
     piece.moves.push(toMove);
     this.history.push({
-      san:
-        piece instanceof Pawn
-          ? fromMove[0] + "x" + toMove
-          : piece.type + "x" + toMove,
       from: fromPos,
       to: toPos,
-      capturedPiece: attackedPiece,
+      capture: attackedPiece,
+      san: this.generateSan({
+        piece,
+        from: fromMove,
+        to: toMove,
+        capture: Boolean(attackedPiece),
+        check,
+        mate,
+      }),
     });
 
-    this.togglePlayingColor();
-
-    // Following KISS principle (Brute force)
-    if (this.inCheck(this.playingColor === "w" ? "b" : "w")) {
-      this.undo();
-      throw new Error("Invalid attack = King in check");
+    if (mate) {
+      this.gameOver = this.playingColor === "w" ? "1-0" : "0-1";
+    } else if (draw) {
+      this.gameOver = "0-0";
+    } else {
+      this.togglePlayingColor();
+      this.currLegalMoves = opponentLegalMoves;
     }
   }
 
@@ -677,56 +704,13 @@ export class Chesspirito {
     this.setSquare(lastMove.from, movedPiece);
     movedPiece.moves.pop();
 
-    if (lastMove.capturedPiece !== null) {
-      this.setSquare(lastMove.to, lastMove.capturedPiece);
+    if (lastMove.capture !== null) {
+      this.setSquare(lastMove.to, lastMove.capture);
     } else {
       this.setSquare(lastMove.to, null);
     }
 
     this.togglePlayingColor();
-  }
-
-  isSquareAttacked(position: string | Position) {
-    const pos =
-      typeof position === "string"
-        ? this.getPositionFromMove(position)
-        : position;
-
-    const piece = this.getSquare(pos);
-
-    if (piece === null) {
-      throw new Error("Invalid calculation = no piece");
-    }
-
-    for (let y = 0; y < RANK_LENGTH; y++) {
-      for (let x = 0; x < RANK_LENGTH; x++) {
-        const attackingPiece = this.getSquare({ y, x });
-
-        if (
-          attackingPiece !== null &&
-          attackingPiece.color !== piece.color &&
-          attackingPiece.canAttack(pos)
-        ) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  inCheck(color: Color) {
-    for (let y = 0; y < RANK_LENGTH; y++) {
-      for (let x = 0; x < RANK_LENGTH; x++) {
-        const piece = this.getSquare({ y, x });
-
-        if (piece !== null && piece instanceof King && piece.color === color) {
-          return this.isSquareAttacked({ y, x });
-        }
-      }
-    }
-
-    throw new Error("Invalid calculation = King not found");
   }
 
   print() {
