@@ -69,10 +69,6 @@ function isSamePosition(pos1: Position, pos2: Position): boolean {
   return pos1.x === pos2.x && pos1.y === pos2.y;
 }
 
-function getOppositeColor(color: Color): Color {
-  return color === "w" ? "b" : "w";
-}
-
 function generateSlidingMoves(piece: ChessPiece, directions: Direction[]) {
   const board = piece.board;
   const moves: Move[] = [];
@@ -448,8 +444,12 @@ export class Chesspirito {
     return this.getSquare(pos) === null;
   }
 
+  private getOpponentColor() {
+    return this.playingColor === "w" ? "b" : "w";
+  }
+
   private togglePlayingColor() {
-    this.playingColor = this.playingColor === "w" ? "b" : "w";
+    this.playingColor = this.getOpponentColor();
   }
 
   private getPositionFromMove(mv: string): Position {
@@ -475,10 +475,10 @@ export class Chesspirito {
   }
 
   private getMoveFromPosition(pos: Position): string {
-    return FILES[pos.y] + pos.x;
+    return FILES[pos.x] + (pos.y + 1);
   }
 
-  private generateSan({
+  private generateSanFromMove({
     piece,
     from,
     to,
@@ -539,7 +539,7 @@ export class Chesspirito {
 
     const king = color === "w" ? Piece.WHITE_KING : Piece.BLACK_KING;
 
-    const opponentColor = getOppositeColor(color);
+    const opponentColor = this.getOpponentColor();
 
     for (const pseudoLegalMove of pseudoLegalMoves) {
       const square = this.getSquare(pseudoLegalMove.from);
@@ -566,6 +566,18 @@ export class Chesspirito {
     return legalMoves;
   }
 
+  private isSquareAttacked(attackingColor: Color, target: Position) {
+    const moves = this.generateMoves(attackingColor);
+
+    return moves.some((move) => {
+      if (!move.onlyMove) {
+        return isSamePosition(move.to, target);
+      } else {
+        return false;
+      }
+    });
+  }
+
   private getKingPosition(color: Color): Position {
     const king = color === "w" ? Piece.WHITE_KING : Piece.BLACK_KING;
 
@@ -584,17 +596,145 @@ export class Chesspirito {
 
   private inCheck(color: Color) {
     const kingPos = this.getKingPosition(color);
-    const opponentColor = getOppositeColor(color);
+    const opponentColor = this.getOpponentColor();
 
-    const opponentMoves = this.generateMoves(opponentColor);
+    return this.isSquareAttacked(opponentColor, kingPos);
+  }
 
-    return opponentMoves.some((move) => {
-      if (!move.onlyMove) {
-        return isSamePosition(move.to, kingPos);
-      } else {
-        return false;
+  private handleCastling(king: King, from: Position, to: Position) {
+    if (king.moves.length > 0) {
+      throw new Error("Invalid castling = not first King move");
+    }
+
+    const isQueenside = from.x > to.x;
+    const isWhite = this.playingColor === "w";
+
+    let rookFrom: Position;
+    let rookTo: Position;
+    let emptySquaresRequired: Position[];
+
+    if (isQueenside) {
+      const whiteRook: Position = { y: 7, x: 0 };
+      const blackRook: Position = { y: 0, x: 0 };
+
+      const whiteRookTo: Position = { y: 7, x: 3 };
+      const blackRookTo: Position = { y: 0, x: 3 };
+
+      const whiteEmptySquaresRequired: Position[] = [
+        { y: 7, x: 3 },
+        { y: 7, x: 2 },
+        { y: 7, x: 1 },
+      ];
+      const blackEmptySquaresRequired: Position[] = [
+        { y: 0, x: 3 },
+        { y: 0, x: 2 },
+        { y: 0, x: 1 },
+      ];
+
+      rookFrom = isWhite ? whiteRook : blackRook;
+      rookTo = isWhite ? whiteRookTo : blackRookTo;
+
+      emptySquaresRequired = isWhite
+        ? whiteEmptySquaresRequired
+        : blackEmptySquaresRequired;
+    } else {
+      const whiteRook: Position = { y: 7, x: 7 };
+      const blackRook: Position = { y: 0, x: 7 };
+
+      const whiteRookTo: Position = { y: 7, x: 5 };
+      const blackRookTo: Position = { y: 0, x: 5 };
+
+      const whiteEmptySquaresRequired: Position[] = [
+        { y: 7, x: 5 },
+        { y: 7, x: 6 },
+      ];
+      const blackEmptySquaresRequired: Position[] = [
+        { y: 0, x: 5 },
+        { y: 0, x: 6 },
+      ];
+
+      rookFrom = isWhite ? whiteRook : blackRook;
+      rookTo = isWhite ? whiteRookTo : blackRookTo;
+
+      emptySquaresRequired = isWhite
+        ? whiteEmptySquaresRequired
+        : blackEmptySquaresRequired;
+    }
+
+    const rook = this.getSquare(rookFrom);
+
+    if (rook === null || rook.moves.length > 0) {
+      throw new Error("Invalid castling = not first Rook move");
+    }
+
+    for (const pos of emptySquaresRequired) {
+      if (!this.isSquareEmpty(pos)) {
+        throw new Error("Invalid castling = blocked by piece");
       }
+    }
+
+    if (this.inCheck(this.playingColor)) {
+      throw new Error("Invalid castling = King in check");
+    }
+
+    const notAttackedSquaresRequired = emptySquaresRequired.slice(0, 2);
+    const opponentColor = this.getOpponentColor();
+
+    for (const target of notAttackedSquaresRequired) {
+      if (this.isSquareAttacked(opponentColor, target)) {
+        throw new Error("Invalid castling = blocked by attack");
+      }
+    }
+
+    this.setSquare(to, king);
+    this.setSquare(from, null);
+
+    this.setSquare(rookTo, rook);
+    this.setSquare(rookFrom, null);
+
+    const check = this.inCheck(opponentColor);
+    const opponentLegalMoves = this.generateLegalMoves(opponentColor);
+
+    let mate = false;
+    let draw = false;
+
+    if (opponentLegalMoves.length === 0) {
+      if (check) {
+        mate = true;
+      } else {
+        draw = true;
+      }
+    }
+
+    const toMove = this.getMoveFromPosition(to);
+    const rookToMove = this.getMoveFromPosition(rookTo);
+
+    king.moves.push(toMove);
+    rook.moves.push(rookToMove);
+
+    let san = isQueenside ? "O-O-O" : "O-O";
+
+    if (mate) {
+      san += "#";
+    } else if (check) {
+      san += "+";
+    }
+
+    this.history.push({
+      from: from,
+      to: to,
+      capture: null,
+      san,
     });
+
+    if (mate) {
+      this.gameOver = this.playingColor === "w" ? "1-0" : "0-1";
+    } else if (draw) {
+      this.gameOver = "0-0";
+    } else {
+      this.togglePlayingColor();
+      this.currLegalMoves = opponentLegalMoves;
+    }
   }
 
   move(from: string | Position, to: string | Position) {
@@ -627,6 +767,14 @@ export class Chesspirito {
 
     if (targetPiece instanceof King) {
       throw new Error("Invalid attack = King cannot be captured");
+    }
+
+    if (
+      piece instanceof King &&
+      fromPos.y === toPos.y &&
+      Math.abs(toPos.x - fromPos.x) === 2
+    ) {
+      return this.handleCastling(piece, fromPos, toPos);
     }
 
     const attacking = targetPiece !== null;
@@ -687,7 +835,7 @@ export class Chesspirito {
       this.enPassantable = null;
     }
 
-    const opponentColor = getOppositeColor(this.playingColor);
+    const opponentColor = this.getOpponentColor();
 
     const check = this.inCheck(opponentColor);
     const opponentLegalMoves = this.generateLegalMoves(opponentColor);
@@ -712,7 +860,7 @@ export class Chesspirito {
       from: fromPos,
       to: toPos,
       capture,
-      san: this.generateSan({
+      san: this.generateSanFromMove({
         piece,
         from: fromMove,
         to: toMove,
