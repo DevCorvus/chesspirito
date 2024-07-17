@@ -363,6 +363,7 @@ interface SanGenerationOptions {
   from: string;
   to: string;
   capture: boolean;
+  enPassant: boolean;
   check: boolean;
   mate: boolean;
 }
@@ -373,11 +374,13 @@ export class Chesspirito {
   grid: Square[][];
   playingColor: Color;
   currLegalMoves: Move[];
+  enPassantable: Position | null;
   history: HistoryMove[];
   gameOver: GameOver | null;
 
   constructor(fen = DEFAULT_FEN) {
     this.grid = [];
+    this.enPassantable = null;
     this.history = [];
     this.gameOver = null;
 
@@ -480,6 +483,7 @@ export class Chesspirito {
     from,
     to,
     capture,
+    enPassant,
     check,
     mate,
   }: SanGenerationOptions): string {
@@ -503,6 +507,10 @@ export class Chesspirito {
       san += "#";
     } else if (check) {
       san += "+";
+    }
+
+    if (enPassant) {
+      san += " e.p.";
     }
 
     return san;
@@ -603,7 +611,7 @@ export class Chesspirito {
     }
 
     const piece = this.getSquare(fromPos);
-    const attackedPiece = this.getSquare(toPos);
+    const targetPiece = this.getSquare(toPos);
 
     if (piece === null) {
       throw new Error("Invalid move = no piece");
@@ -613,26 +621,45 @@ export class Chesspirito {
       throw new Error("Invalid move = not playing color");
     }
 
-    if (attackedPiece?.color === this.playingColor) {
+    if (targetPiece?.color === this.playingColor) {
       throw new Error("Invalid move = cannot move to friendly piece");
     }
 
-    if (attackedPiece instanceof King) {
+    if (targetPiece instanceof King) {
       throw new Error("Invalid attack = King cannot be captured");
     }
 
-    const attacking = Boolean(attackedPiece);
+    const attacking = targetPiece !== null;
+    let enPassant = false;
 
     const isLegalMove = this.currLegalMoves.some((move) => {
       const validPosition =
         isSamePosition(move.from, fromPos) && isSamePosition(move.to, toPos);
 
-      if (move.onlyMove) {
-        return validPosition && !attacking;
+      if (!validPosition) {
+        return false;
+      }
+
+      if (
+        piece instanceof Pawn &&
+        !attacking &&
+        this.enPassantable &&
+        isSamePosition(
+          {
+            y: this.enPassantable.y - (this.playingColor === "w" ? 1 : -1),
+            x: this.enPassantable.x,
+          },
+          toPos,
+        )
+      ) {
+        enPassant = true;
+        return true;
+      } else if (move.onlyMove) {
+        return !attacking;
       } else if (move.onlyAttack) {
-        return validPosition && attacking;
+        return attacking;
       } else {
-        return validPosition;
+        return true;
       }
     });
 
@@ -640,8 +667,25 @@ export class Chesspirito {
       throw new Error("Invalid move = " + from + "-" + to);
     }
 
+    let capture = targetPiece;
+
     this.setSquare(toPos, piece);
     this.setSquare(fromPos, null);
+
+    if (this.enPassantable && enPassant) {
+      capture = this.getSquare(this.enPassantable);
+      this.setSquare(this.enPassantable, null);
+    }
+
+    if (
+      piece instanceof Pawn &&
+      !attacking &&
+      Math.abs(toPos.y - fromPos.y) === 2
+    ) {
+      this.enPassantable = toPos;
+    } else {
+      this.enPassantable = null;
+    }
 
     const opponentColor = getOppositeColor(this.playingColor);
 
@@ -667,12 +711,13 @@ export class Chesspirito {
     this.history.push({
       from: fromPos,
       to: toPos,
-      capture: attackedPiece,
+      capture,
       san: this.generateSan({
         piece,
         from: fromMove,
         to: toMove,
-        capture: Boolean(attackedPiece),
+        capture: capture !== null,
+        enPassant,
         check,
         mate,
       }),
