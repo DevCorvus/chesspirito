@@ -4,13 +4,13 @@ import { Chesspirito } from "./engine";
 const chess = new Chesspirito();
 
 try {
-  chess.move("e7", "e6");
-  chess.move("a2", "a3");
-  chess.move("f8", "c5");
-  chess.move("a3", "a4");
-  chess.move("d8", "f6");
-  chess.move("a4", "a5");
-  chess.move("f6", "f2");
+  chess.move("g1", "h3");
+  chess.move("a7", "a6");
+  chess.move("e2", "e3");
+  chess.move("a6", "a5");
+  chess.move("f1", "c4");
+  chess.move("a5", "a4");
+  chess.move("e1", "g1");
 } catch (err) {
   console.error(err);
 } finally {

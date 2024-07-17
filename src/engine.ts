@@ -1,5 +1,6 @@
 const RANK_LENGTH = 8;
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
+const RANKS = [8, 7, 6, 5, 4, 3, 2, 1];
 
 const DEFAULT_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -52,10 +53,6 @@ interface ChessPiece {
 }
 
 type Square = ChessPiece | null;
-
-function isRank(num: number): boolean {
-  return num >= 1 && num <= 8;
-}
 
 function isOutOfBounds(num: number): boolean {
   return num < 0 || num > 7;
@@ -458,7 +455,6 @@ export class Chesspirito {
     }
 
     const file = mv[0];
-
     const fileIndex = FILES.indexOf(file);
 
     if (fileIndex === -1) {
@@ -466,16 +462,17 @@ export class Chesspirito {
     }
 
     const rank = mv[1];
+    const rankIndex = RANKS.indexOf(Number(rank));
 
-    if (!isRank(Number(rank))) {
+    if (rankIndex === -1) {
       throw new Error("Invalid rank = " + rank);
     }
 
-    return { x: fileIndex, y: Number(rank) - 1 };
+    return { x: fileIndex, y: rankIndex };
   }
 
   private getMoveFromPosition(pos: Position): string {
-    return FILES[pos.x] + (pos.y + 1);
+    return FILES[pos.x] + RANKS[pos.y];
   }
 
   private generateSanFromMove({
