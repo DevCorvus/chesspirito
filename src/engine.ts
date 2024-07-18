@@ -47,6 +47,7 @@ interface HistoryMove {
   to: Position;
   capture: ChessPiece | null;
   promotion: ChessPiece | null;
+  castling: ChessPiece | null;
   lan: string;
 }
 
@@ -781,6 +782,7 @@ export class Chesspirito {
       to,
       capture: null,
       promotion: null,
+      castling: rook,
       lan: san,
     });
 
@@ -928,6 +930,7 @@ export class Chesspirito {
       to: toPos,
       capture,
       promotion: hasPromoted ? piece : null,
+      castling: null,
       lan: this.generateLanFromMove({
         piece,
         from: fromMove,
@@ -956,16 +959,42 @@ export class Chesspirito {
       throw new Error("Invalid undo = unexpected nullish piece");
     }
 
-    this.setSquare(lastMove.from, movedPiece);
     movedPiece.history.pop();
 
+    if (lastMove.promotion !== null) {
+      this.setSquare(lastMove.from, lastMove.promotion);
+      lastMove.promotion.history.pop();
+    } else {
+      this.setSquare(lastMove.from, movedPiece);
+    }
+
     if (lastMove.capture !== null) {
-      this.setSquare(lastMove.to, lastMove.capture);
+      if (isSamePosition(lastMove.to, lastMove.capture.position)) {
+        this.setSquare(lastMove.to, lastMove.capture);
+      } else {
+        this.setSquare(lastMove.capture.position, lastMove.capture);
+        this.setSquare(lastMove.to, null);
+        this.enPassantable = lastMove.capture.position;
+      }
     } else {
       this.setSquare(lastMove.to, null);
     }
 
+    if (lastMove.castling !== null) {
+      const rookFrom = lastMove.castling.history.pop();
+
+      if (!rookFrom) {
+        throw new Error("Invalid undo = unexpected castling error");
+      }
+
+      this.setSquare(lastMove.castling.position, null);
+      this.setSquare(rookFrom, lastMove.castling);
+    }
+
+    this.gameOver = null;
+
     this.togglePlayingColor();
+    this.currLegalMoves = this.generateLegalMoves(this.playingColor);
   }
 
   print() {
