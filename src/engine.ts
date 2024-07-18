@@ -1,6 +1,12 @@
 const RANK_LENGTH = 8;
-const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
-const RANKS = [8, 7, 6, 5, 4, 3, 2, 1];
+
+const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"] as const;
+const RANKS = [8, 7, 6, 5, 4, 3, 2, 1] as const;
+
+type File = (typeof FILES)[number];
+type Rank = (typeof RANKS)[number];
+
+type SanPosition = `${File}${Rank}`;
 
 const DEFAULT_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -18,6 +24,8 @@ enum Piece {
   BLACK_QUEEN = "q",
   BLACK_KING = "k",
 }
+
+type Promotion = "N" | "B" | "R" | "Q";
 
 type DirectionCoordinate = -1 | 0 | 1;
 type Direction = [DirectionCoordinate, DirectionCoordinate];
@@ -38,6 +46,7 @@ interface HistoryMove {
   from: Position;
   to: Position;
   capture: ChessPiece | null;
+  promotion: ChessPiece | null;
   lan: string;
 }
 
@@ -313,8 +322,8 @@ class King implements ChessPiece {
 }
 
 class ChessPieceFactory {
-  static create(board: Chesspirito, char: Piece, pos: Position) {
-    switch (char) {
+  static create(board: Chesspirito, type: Piece, pos: Position) {
+    switch (type) {
       case Piece.WHITE_PAWN: {
         return new Pawn(board, "w", pos);
       }
@@ -355,11 +364,42 @@ class ChessPieceFactory {
   }
 }
 
+class PromotionChessPieceFactory {
+  static create(board: Chesspirito, promotion: Promotion, pos: Position) {
+    let type: Piece;
+
+    switch (promotion) {
+      case "N": {
+        type =
+          board.playingColor === "w" ? Piece.WHITE_KNIGHT : Piece.BLACK_KNIGHT;
+        break;
+      }
+      case "B": {
+        type =
+          board.playingColor === "w" ? Piece.WHITE_BISHOP : Piece.BLACK_BISHOP;
+        break;
+      }
+      case "R": {
+        type = board.playingColor === "w" ? Piece.WHITE_ROOK : Piece.BLACK_ROOK;
+        break;
+      }
+      case "Q": {
+        type =
+          board.playingColor === "w" ? Piece.WHITE_QUEEN : Piece.BLACK_QUEEN;
+        break;
+      }
+    }
+
+    return ChessPieceFactory.create(board, type, pos);
+  }
+}
+
 interface SanGenerationOptions {
   piece: ChessPiece;
-  from: string;
-  to: string;
+  from: SanPosition;
+  to: SanPosition;
   capture: boolean;
+  promotion: Promotion | null;
   enPassant: boolean;
   check: boolean;
   mate: boolean;
@@ -455,14 +495,14 @@ export class Chesspirito {
     }
 
     const file = mv[0];
-    const fileIndex = FILES.indexOf(file);
+    const fileIndex = FILES.indexOf(file as File);
 
     if (fileIndex === -1) {
       throw new Error("Invalid file = " + file);
     }
 
     const rank = mv[1];
-    const rankIndex = RANKS.indexOf(Number(rank));
+    const rankIndex = RANKS.indexOf(Number(rank) as Rank);
 
     if (rankIndex === -1) {
       throw new Error("Invalid rank = " + rank);
@@ -471,8 +511,8 @@ export class Chesspirito {
     return { x: fileIndex, y: rankIndex };
   }
 
-  private getMoveFromPosition(pos: Position): string {
-    return FILES[pos.x] + RANKS[pos.y];
+  private getMoveFromPosition(pos: Position): SanPosition {
+    return (FILES[pos.x] + RANKS[pos.y]) as SanPosition;
   }
 
   private generateLanFromMove({
@@ -480,6 +520,7 @@ export class Chesspirito {
     from,
     to,
     capture,
+    promotion,
     enPassant,
     check,
     mate,
@@ -497,6 +538,10 @@ export class Chesspirito {
     }
 
     lan += to;
+
+    if (promotion !== null) {
+      lan += promotion;
+    }
 
     if (mate) {
       lan += "#";
@@ -735,13 +780,18 @@ export class Chesspirito {
       from,
       to,
       capture: null,
+      promotion: null,
       lan: san,
     });
 
     this.handleNextTurn({ mate, draw, nextLegalMoves: opponentLegalMoves });
   }
 
-  move(from: string | Position, to: string | Position) {
+  move(
+    from: SanPosition | Position,
+    to: SanPosition | Position,
+    promotion: Promotion = "Q",
+  ) {
     if (this.gameOver !== null) {
       throw new Error("Invalid move = GameOver");
     }
@@ -829,14 +879,27 @@ export class Chesspirito {
       this.setSquare(this.enPassantable, null);
     }
 
-    if (
-      piece instanceof Pawn &&
-      !attacking &&
-      Math.abs(toPos.y - fromPos.y) === 2
-    ) {
-      this.enPassantable = toPos;
-    } else {
-      this.enPassantable = null;
+    let hasPromoted = false;
+
+    if (piece instanceof Pawn) {
+      if (!attacking && Math.abs(toPos.y - fromPos.y) === 2) {
+        this.enPassantable = toPos;
+      } else {
+        this.enPassantable = null;
+      }
+
+      const lastRank = this.playingColor === "w" ? 0 : 7;
+
+      if (toPos.y === lastRank) {
+        const newPiece = PromotionChessPieceFactory.create(
+          this,
+          promotion,
+          toPos,
+        );
+
+        this.setSquare(toPos, newPiece);
+        hasPromoted = true;
+      }
     }
 
     const opponentColor = getOppositeColor(this.playingColor);
@@ -864,11 +927,13 @@ export class Chesspirito {
       from: fromPos,
       to: toPos,
       capture,
+      promotion: hasPromoted ? piece : null,
       lan: this.generateLanFromMove({
         piece,
         from: fromMove,
         to: toMove,
         capture: capture !== null,
+        promotion: hasPromoted ? promotion : null,
         enPassant,
         check,
         mate,
