@@ -30,16 +30,17 @@ type Promotion = "N" | "B" | "R" | "Q";
 type DirectionCoordinate = -1 | 0 | 1;
 type Direction = [DirectionCoordinate, DirectionCoordinate];
 
-interface Position {
+export interface Position {
   x: number;
   y: number;
 }
 
-interface Move {
+export interface Move {
   from: Position;
   to: Position;
   onlyMove?: boolean;
   onlyAttack?: boolean;
+  enPassant?: boolean;
 }
 
 interface HistoryMove {
@@ -76,7 +77,7 @@ function isPositionOutOfBounds(pos: Position) {
   return isOutOfBounds(pos.y) || isOutOfBounds(pos.x);
 }
 
-function isSamePosition(pos1: Position, pos2: Position): boolean {
+export function isSamePosition(pos1: Position, pos2: Position): boolean {
   return pos1.x === pos2.x && pos1.y === pos2.y;
 }
 
@@ -155,11 +156,38 @@ class Pawn implements ChessPiece {
       });
     }
 
-    return moves.filter(
-      (move) =>
-        !isPositionOutOfBounds(move.to) &&
-        this.board.getSquare(move.to)?.color !== this.color,
-    );
+    return moves.filter((move) => {
+      if (isPositionOutOfBounds(move.to)) {
+        return false;
+      }
+
+      const piece = this.board.getSquare(move.to);
+
+      if (piece !== null && move.onlyMove) {
+        return false;
+      }
+
+      const enPassantable = this.board.enPassantable;
+
+      if (
+        piece === null &&
+        enPassantable &&
+        isSamePosition(
+          {
+            y: enPassantable.y - (this.color ? 1 : -1),
+            x: enPassantable.x,
+          },
+          move.to,
+        )
+      ) {
+        move.enPassant = true;
+        return true;
+      } else if (piece === null && move.onlyAttack) {
+        return false;
+      }
+
+      return piece?.color !== this.color;
+    });
   }
 }
 
@@ -409,7 +437,7 @@ interface SanGenerationOptions {
 type GameOver = "0-0" | "1-0" | "0-1";
 
 export class Chesspirito {
-  grid: Square[][];
+  board: Square[][];
   playingColor: Color;
   currLegalMoves: Move[];
   enPassantable: Position | null;
@@ -417,14 +445,14 @@ export class Chesspirito {
   gameOver: GameOver | null;
 
   constructor(fen = DEFAULT_FEN) {
-    this.grid = [];
+    this.board = [];
     this.enPassantable = null;
     this.history = [];
     this.gameOver = null;
 
     for (let y = 0; y < RANK_LENGTH; y++) {
       const emptyRank = Array(RANK_LENGTH).fill(null);
-      this.grid.push(emptyRank);
+      this.board.push(emptyRank);
     }
 
     const fenParts = fen.split(" ");
@@ -471,11 +499,11 @@ export class Chesspirito {
   }
 
   getSquare(pos: Position): Square {
-    return this.grid[pos.y][pos.x];
+    return this.board[pos.y][pos.x];
   }
 
   private setSquare(pos: Position, square: Square): void {
-    this.grid[pos.y][pos.x] = square;
+    this.board[pos.y][pos.x] = square;
 
     if (square !== null) {
       square.position = pos;
@@ -802,6 +830,10 @@ export class Chesspirito {
       typeof from === "string" ? this.getPositionFromMove(from) : from;
     const toPos = typeof to === "string" ? this.getPositionFromMove(to) : to;
 
+    const fromMove =
+      typeof from === "object" ? this.getMoveFromPosition(from) : from;
+    const toMove = typeof to === "object" ? this.getMoveFromPosition(to) : to;
+
     if (isPositionOutOfBounds(fromPos) || isPositionOutOfBounds(toPos)) {
       throw new Error("Invalid move = out of bounds");
     }
@@ -844,31 +876,15 @@ export class Chesspirito {
         return false;
       }
 
-      if (
-        piece instanceof Pawn &&
-        !attacking &&
-        this.enPassantable &&
-        isSamePosition(
-          {
-            y: this.enPassantable.y - (this.playingColor === "w" ? 1 : -1),
-            x: this.enPassantable.x,
-          },
-          toPos,
-        )
-      ) {
+      if (move.enPassant) {
         enPassant = true;
-        return true;
-      } else if (move.onlyMove) {
-        return !attacking;
-      } else if (move.onlyAttack) {
-        return attacking;
-      } else {
-        return true;
       }
+
+      return true;
     });
 
     if (!isLegalMove) {
-      throw new Error("Invalid move = " + from + "-" + to);
+      throw new Error("Invalid move = " + fromMove + "-" + toMove);
     }
 
     let capture = targetPiece;
@@ -919,10 +935,6 @@ export class Chesspirito {
         draw = true;
       }
     }
-
-    const fromMove =
-      typeof from === "object" ? this.getMoveFromPosition(from) : from;
-    const toMove = typeof to === "object" ? this.getMoveFromPosition(to) : to;
 
     piece.history.push(fromPos);
     this.history.push({
@@ -991,13 +1003,17 @@ export class Chesspirito {
       this.setSquare(rookFrom, lastMove.castling);
     }
 
-    this.gameOver = null;
+    if (this.gameOver === null) {
+      this.togglePlayingColor();
+    }
 
-    this.togglePlayingColor();
+    this.gameOver = null;
     this.currLegalMoves = this.generateLegalMoves(this.playingColor);
   }
 
-  print() {
-    console.log(this.grid);
+  getLegalMoves(from: Position) {
+    return this.currLegalMoves.filter((move) =>
+      isSamePosition(move.from, from),
+    );
   }
 }
