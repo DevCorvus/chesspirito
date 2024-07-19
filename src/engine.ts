@@ -174,7 +174,7 @@ class Pawn implements ChessPiece {
         enPassantable &&
         isSamePosition(
           {
-            y: enPassantable.y - (this.color ? 1 : -1),
+            y: enPassantable.y + (this.board.playingColor === "w" ? 1 : -1),
             x: enPassantable.x,
           },
           move.to,
