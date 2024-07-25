@@ -569,7 +569,7 @@ export class Chesspirito {
     lan += to;
 
     if (promotion !== null) {
-      lan += promotion;
+      lan += "=" + promotion;
     }
 
     if (mate) {
@@ -679,6 +679,10 @@ export class Chesspirito {
     draw: boolean;
     nextLegalMoves: Move[];
   }) {
+    if (mate || draw) {
+      this.currLegalMoves = [];
+    }
+
     if (mate) {
       this.gameOver = this.playingColor === "w" ? "1-0" : "0-1";
     } else if (draw) {
