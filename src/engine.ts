@@ -438,17 +438,25 @@ type GameOver = "0-0" | "1-0" | "0-1";
 
 export class Chesspirito {
   board: Square[][];
-  playingColor: Color;
-  currLegalMoves: Move[];
-  enPassantable: Position | null;
   history: HistoryMove[];
   gameOver: GameOver | null;
 
+  whiteKingPosition: Position | null;
+  blackKingPosition: Position | null;
+  playingColor: Color;
+  check: Color | null;
+  currLegalMoves: Move[];
+  enPassantable: Position | null;
+
   constructor(fen = DEFAULT_FEN) {
     this.board = [];
-    this.enPassantable = null;
     this.history = [];
     this.gameOver = null;
+
+    this.whiteKingPosition = null;
+    this.blackKingPosition = null;
+    this.check = null;
+    this.enPassantable = null;
 
     for (let y = 0; y < RANK_LENGTH; y++) {
       const emptyRank = Array(RANK_LENGTH).fill(null);
@@ -487,6 +495,8 @@ export class Chesspirito {
     const legalMoves = this.generateLegalMoves(this.playingColor);
     const check = this.inCheck(this.playingColor);
 
+    this.check = check ? this.playingColor : null;
+
     if (legalMoves.length === 0) {
       if (check) {
         this.gameOver = this.playingColor === "w" ? "1-0" : "0-1";
@@ -506,7 +516,17 @@ export class Chesspirito {
     this.board[pos.y][pos.x] = square;
 
     if (square !== null) {
-      square.position = pos;
+      const piece = square;
+
+      piece.position = pos;
+
+      if (piece instanceof King) {
+        if (piece.color === "w") {
+          this.whiteKingPosition = pos;
+        } else {
+          this.blackKingPosition = pos;
+        }
+      }
     }
   }
 
@@ -647,20 +667,15 @@ export class Chesspirito {
     });
   }
 
-  private getKingPosition(color: Color): Position {
-    const king = color === "w" ? Piece.WHITE_KING : Piece.BLACK_KING;
+  getKingPosition(color: Color): Position {
+    const kingPos =
+      color === "w" ? this.whiteKingPosition : this.blackKingPosition;
 
-    for (let y = 0; y < RANK_LENGTH; y++) {
-      for (let x = 0; x < RANK_LENGTH; x++) {
-        const piece = this.getSquare({ y, x });
-
-        if (piece !== null && piece.color === color && piece.type === king) {
-          return piece.position;
-        }
-      }
+    if (kingPos === null) {
+      throw new Error("King not found");
     }
 
-    throw new Error("King not found");
+    return kingPos;
   }
 
   private inCheck(color: Color) {
@@ -784,8 +799,10 @@ export class Chesspirito {
     this.setSquare(rookTo, rook);
     this.setSquare(rookFrom, null);
 
-    const check = this.inCheck(opponentColor);
     const opponentLegalMoves = this.generateLegalMoves(opponentColor);
+    const check = this.inCheck(opponentColor);
+
+    this.check = check ? opponentColor : null;
 
     let mate = false;
     let draw = false;
@@ -926,8 +943,10 @@ export class Chesspirito {
 
     const opponentColor = getOppositeColor(this.playingColor);
 
-    const check = this.inCheck(opponentColor);
     const opponentLegalMoves = this.generateLegalMoves(opponentColor);
+    const check = this.inCheck(opponentColor);
+
+    this.check = check ? opponentColor : null;
 
     let mate = false;
     let draw = false;
@@ -1009,6 +1028,12 @@ export class Chesspirito {
 
     if (this.gameOver === null) {
       this.togglePlayingColor();
+    }
+
+    if (this.inCheck(this.playingColor)) {
+      this.check = this.playingColor;
+    } else {
+      this.check = null;
     }
 
     this.gameOver = null;
