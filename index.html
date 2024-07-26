@@ -7,7 +7,16 @@
     <title>Chesspirito</title>
   </head>
   <body>
-    <div id="app"></div>
+    <main class="game">
+      <div>
+        <p id="gameover-status"></p>
+        <div class="chessboard" id="chessboard"></div>
+      </div>
+      <div>
+        <button id="undo">Undo</button>
+        <div class="scoreboard" id="scoreboard"></div>
+      </div>
+    </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
