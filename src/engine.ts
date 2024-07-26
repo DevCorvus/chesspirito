@@ -423,6 +423,19 @@ class PromotionChessPieceFactory {
   }
 }
 
+interface CastlingRight {
+  target: Position;
+  rook: {
+    from: Position;
+    to: Position;
+  };
+}
+
+interface CastlingRights {
+  queenside: CastlingRight | null;
+  kingside: CastlingRight | null;
+}
+
 interface SanGenerationOptions {
   piece: ChessPiece;
   from: SanPosition;
@@ -446,6 +459,7 @@ export class Chesspirito {
   playingColor: Color;
   check: Color | null;
   currLegalMoves: Move[];
+  currCastlingRights: CastlingRights;
   enPassantable: Position | null;
 
   constructor(fen = DEFAULT_FEN) {
@@ -506,6 +520,7 @@ export class Chesspirito {
     }
 
     this.currLegalMoves = legalMoves;
+    this.currCastlingRights = this.generateCastlingRights(this.playingColor);
   }
 
   getSquare(pos: Position): Square {
@@ -696,6 +711,7 @@ export class Chesspirito {
   }) {
     if (mate || draw) {
       this.currLegalMoves = [];
+      this.currCastlingRights = { queenside: null, kingside: null };
     }
 
     if (mate) {
@@ -705,92 +721,148 @@ export class Chesspirito {
     } else {
       this.togglePlayingColor();
       this.currLegalMoves = nextLegalMoves;
+      this.currCastlingRights = this.generateCastlingRights(this.playingColor);
     }
   }
 
-  private handleCastling(king: King, from: Position, to: Position) {
-    if (king.history.length > 0) {
-      throw new Error("Invalid castling = not first King move");
+  generateCastlingRights(color: Color): CastlingRights {
+    const castlingRights: CastlingRights = { queenside: null, kingside: null };
+
+    if (this.inCheck(this.playingColor)) {
+      return castlingRights;
     }
 
-    const isQueenside = from.x > to.x;
-    const isWhite = this.playingColor === "w";
+    const king = this.getSquare(this.getKingPosition(color))!;
 
-    let rookFrom: Position;
-    let rookTo: Position;
-    let emptySquaresRequired: Position[];
+    if (king.history.length > 0) {
+      return castlingRights;
+    }
 
-    if (isQueenside) {
-      const whiteRook: Position = { y: 7, x: 0 };
-      const blackRook: Position = { y: 0, x: 0 };
+    const isCastlingSideValid = (
+      rookPos: Position,
+      emptySquaresRequired: Position[],
+    ): boolean => {
+      const rook = this.getSquare(rookPos);
 
-      const whiteRookTo: Position = { y: 7, x: 3 };
-      const blackRookTo: Position = { y: 0, x: 3 };
+      if (rook === null || rook.history.length > 0) {
+        return false;
+      }
 
-      const whiteEmptySquaresRequired: Position[] = [
+      for (const pos of emptySquaresRequired) {
+        if (!this.isSquareEmpty(pos)) {
+          return false;
+        }
+      }
+
+      const notAttackedSquaresRequired = emptySquaresRequired.slice(0, 2);
+      const opponentColor = getOppositeColor(this.playingColor);
+
+      for (const target of notAttackedSquaresRequired) {
+        if (this.isSquareAttacked(opponentColor, target)) {
+          return false;
+        }
+      }
+
+      return true;
+    };
+
+    if (this.playingColor === "w") {
+      const queensideRook: Position = { y: 7, x: 0 };
+      const queensideEmptySquaresRequired: Position[] = [
         { y: 7, x: 3 },
         { y: 7, x: 2 },
         { y: 7, x: 1 },
       ];
-      const blackEmptySquaresRequired: Position[] = [
+
+      if (isCastlingSideValid(queensideRook, queensideEmptySquaresRequired)) {
+        castlingRights.queenside = {
+          target: { y: 7, x: 2 },
+          rook: {
+            from: queensideRook,
+            to: { y: 7, x: 3 },
+          },
+        };
+      }
+
+      const kingsideRook: Position = { y: 7, x: 7 };
+      const kingsideEmptySquaresRequired: Position[] = [
+        { y: 7, x: 5 },
+        { y: 7, x: 6 },
+      ];
+
+      if (isCastlingSideValid(kingsideRook, kingsideEmptySquaresRequired)) {
+        castlingRights.kingside = {
+          target: { y: 7, x: 6 },
+          rook: {
+            from: kingsideRook,
+            to: { y: 7, x: 5 },
+          },
+        };
+      }
+    } else {
+      const queensideRook: Position = { y: 0, x: 0 };
+      const queensideEmptySquaresRequired: Position[] = [
         { y: 0, x: 3 },
         { y: 0, x: 2 },
         { y: 0, x: 1 },
       ];
 
-      rookFrom = isWhite ? whiteRook : blackRook;
-      rookTo = isWhite ? whiteRookTo : blackRookTo;
+      if (isCastlingSideValid(queensideRook, queensideEmptySquaresRequired)) {
+        castlingRights.queenside = {
+          target: { y: 0, x: 2 },
+          rook: {
+            from: queensideRook,
+            to: { y: 0, x: 3 },
+          },
+        };
+      }
 
-      emptySquaresRequired = isWhite
-        ? whiteEmptySquaresRequired
-        : blackEmptySquaresRequired;
-    } else {
-      const whiteRook: Position = { y: 7, x: 7 };
-      const blackRook: Position = { y: 0, x: 7 };
-
-      const whiteRookTo: Position = { y: 7, x: 5 };
-      const blackRookTo: Position = { y: 0, x: 5 };
-
-      const whiteEmptySquaresRequired: Position[] = [
-        { y: 7, x: 5 },
-        { y: 7, x: 6 },
-      ];
-      const blackEmptySquaresRequired: Position[] = [
+      const kingsideRook: Position = { y: 0, x: 7 };
+      const kingsideEmptySquaresRequired: Position[] = [
         { y: 0, x: 5 },
         { y: 0, x: 6 },
       ];
 
-      rookFrom = isWhite ? whiteRook : blackRook;
-      rookTo = isWhite ? whiteRookTo : blackRookTo;
-
-      emptySquaresRequired = isWhite
-        ? whiteEmptySquaresRequired
-        : blackEmptySquaresRequired;
-    }
-
-    const rook = this.getSquare(rookFrom);
-
-    if (rook === null || rook.history.length > 0) {
-      throw new Error("Invalid castling = not first Rook move");
-    }
-
-    for (const pos of emptySquaresRequired) {
-      if (!this.isSquareEmpty(pos)) {
-        throw new Error("Invalid castling = blocked by piece");
+      if (isCastlingSideValid(kingsideRook, kingsideEmptySquaresRequired)) {
+        castlingRights.kingside = {
+          target: { y: 0, x: 6 },
+          rook: {
+            from: kingsideRook,
+            to: { y: 0, x: 5 },
+          },
+        };
       }
     }
 
-    if (this.inCheck(this.playingColor)) {
-      throw new Error("Invalid castling = King in check");
+    return castlingRights;
+  }
+
+  private handleCastlingMove(king: King, from: Position, to: Position) {
+    const isQueensideMove = from.x > to.x;
+    const castlingRights = this.currCastlingRights;
+
+    if (
+      (castlingRights.queenside === null && castlingRights.kingside === null) ||
+      (isQueensideMove && castlingRights.queenside === null) ||
+      (!isQueensideMove && castlingRights.kingside === null)
+    ) {
+      throw new Error("Invalid castling");
     }
 
-    const notAttackedSquaresRequired = emptySquaresRequired.slice(0, 2);
-    const opponentColor = getOppositeColor(this.playingColor);
+    let rook: Rook;
+    let rookFrom: Position;
+    let rookTo: Position;
 
-    for (const target of notAttackedSquaresRequired) {
-      if (this.isSquareAttacked(opponentColor, target)) {
-        throw new Error("Invalid castling = blocked by attack");
-      }
+    if (isQueensideMove) {
+      const queensideRook = castlingRights.queenside!.rook;
+      rook = this.getSquare(queensideRook.from)!;
+      rookFrom = queensideRook.from;
+      rookTo = queensideRook.to;
+    } else {
+      const kingsideRook = castlingRights.kingside!.rook;
+      rook = this.getSquare(kingsideRook.from)!;
+      rookFrom = kingsideRook.from;
+      rookTo = kingsideRook.to;
     }
 
     this.setSquare(to, king);
@@ -799,6 +871,7 @@ export class Chesspirito {
     this.setSquare(rookTo, rook);
     this.setSquare(rookFrom, null);
 
+    const opponentColor = getOppositeColor(this.playingColor);
     const opponentLegalMoves = this.generateLegalMoves(opponentColor);
     const check = this.inCheck(opponentColor);
 
@@ -818,7 +891,7 @@ export class Chesspirito {
     king.history.push(from);
     rook.history.push(rookFrom);
 
-    let san = isQueenside ? "O-O-O" : "O-O";
+    let san = isQueensideMove ? "O-O-O" : "O-O";
 
     if (mate) {
       san += "#";
@@ -883,7 +956,7 @@ export class Chesspirito {
       fromPos.y === toPos.y &&
       Math.abs(toPos.x - fromPos.x) === 2
     ) {
-      return this.handleCastling(piece, fromPos, toPos);
+      return this.handleCastlingMove(piece, fromPos, toPos);
     }
 
     const attacking = targetPiece !== null;
@@ -1038,6 +1111,7 @@ export class Chesspirito {
 
     this.gameOver = null;
     this.currLegalMoves = this.generateLegalMoves(this.playingColor);
+    this.currCastlingRights = this.generateCastlingRights(this.playingColor);
   }
 
   getLegalMoves(from: Position) {
