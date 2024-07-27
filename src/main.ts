@@ -169,7 +169,7 @@ function renderPieces() {
       const img = document.createElement("img");
       const chessPieceType = piece.type.toUpperCase() as ChessPieceImage;
 
-      img.src = CHESS_PIECE_IMAGES[chessPieceType];
+      img.src = import.meta.env.BASE_URL + CHESS_PIECE_IMAGES[chessPieceType];
 
       if (piece.color === "b") {
         img.style.filter = "invert(100%)";
